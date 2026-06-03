@@ -1,0 +1,23 @@
+{
+  "name": "personal-task-manager-root",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Personal Task Management Application Workspace",
+  "scripts": {
+    "install:all": "npm install && npm install --prefix server",
+    "dev:server": "npm run dev --prefix server",
+    "build:server": "npm run build --prefix server",
+    "start:server": "npm run start --prefix server",
+    "test": "npx --yes vitest run"
+  },
+  "keywords": [
+    "task-manager",
+    "express",
+    "typescript",
+    "react",
+    "jwt",
+    "zod"
+  ],
+  "author": "Production Engineer",
+  "license": "MIT"
+}

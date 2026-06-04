@@ -1,519 +1,674 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  CheckCircle, 
-  Circle, 
-  Trash2, 
-  Edit2, 
   Plus, 
-  Calendar, 
-  AlertCircle, 
+  Search, 
   Filter, 
-  ArrowUpDown, 
+  Calendar, 
+  Edit2, 
+  Trash2, 
+  X, 
   Check, 
-  X,
+  Loader2, 
+  AlertCircle,
+  ChevronRight,
+  ChevronLeft,
+  ListTodo,
+  CheckCircle2,
   Clock,
-  ListTodo
+  RefreshCw,
+  AlertTriangle
 } from 'lucide-react';
 
-function App() {
+const API_URL = 'http://localhost:5000/api/tasks';
+
+export default function App() {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  
+  // Search and Filter State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [priorityFilter, setPriorityFilter] = useState('All');
+  
+  // Modal State
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState('create'); // 'create' | 'edit'
+  const [currentTask, setCurrentTask] = useState(null);
+  const [formData, setFormData] = useState({
+    title: '',
+    description: '',
+    priority: 'Medium',
+    due_date: '',
+    status: 'To Do'
+  });
+  const [formErrors, setFormErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
 
-  // Form state
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [priority, setPriority] = useState('medium');
-  const [dueDate, setDueDate] = useState('');
-  const [editingTaskId, setEditingTaskId] = useState(null);
+  // Delete Confirmation State
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [taskToDelete, setTaskToDelete] = useState(null);
 
-  // Filter and Sort state
-  const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'pending', 'completed'
-  const [sortBy, setSortBy] = useState('created_at'); // 'created_at', 'due_date', 'priority'
-  const [sortOrder, setSortOrder] = useState('desc'); // 'asc', 'desc'
+  // Fetch tasks on mount
+  useEffect(() => {
+    fetchTasks();
+  }, []);
 
-  // Fetch tasks
   const fetchTasks = async () => {
+    setLoading(true);
+    setError(null);
     try {
-      setLoading(true);
-      const response = await fetch('/api/tasks');
+      const response = await fetch(API_URL);
       if (!response.ok) {
-        throw new Error('Failed to fetch tasks');
+        throw new Error('Failed to fetch tasks. Please make sure the backend server is running.');
       }
       const data = await response.json();
       setTasks(data);
-      setError(null);
     } catch (err) {
-      setError('Could not connect to the server. Please make sure the backend is running.');
-      console.error(err);
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    fetchTasks();
-  }, []);
-
-  // Handle Create or Update
-  const handleSubmit = async (e) => {
+  const handleCreateOrUpdate = async (e) => {
     e.preventDefault();
-    if (!title.trim()) return;
+    
+    // Validate
+    const errors = {};
+    if (!formData.title.trim()) {
+      errors.title = 'Title is required';
+    }
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
+      return;
+    }
 
-    const taskData = {
-      title: title.trim(),
-      description,
-      priority,
-      due_date: dueDate || null
-    };
+    setSubmitting(true);
+    setError(null);
 
     try {
-      if (editingTaskId) {
-        // Update
-        const response = await fetch(`/api/tasks/${editingTaskId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(taskData)
-        });
-        if (!response.ok) throw new Error('Failed to update task');
-        const updatedTask = await response.json();
-        setTasks(tasks.map(t => t.id === editingTaskId ? updatedTask : t));
-        setEditingTaskId(null);
-      } else {
-        // Create
-        const response = await fetch('/api/tasks', {
+      let response;
+      if (modalMode === 'create') {
+        response = await fetch(API_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(taskData)
+          body: JSON.stringify(formData)
         });
-        if (!response.ok) throw new Error('Failed to create task');
-        const newTask = await response.json();
-        setTasks([newTask, ...tasks]);
+      } else {
+        response = await fetch(`${API_URL}/${currentTask.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formData)
+        });
       }
 
-      // Reset form
-      setTitle('');
-      setDescription('');
-      setPriority('medium');
-      setDueDate('');
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || 'Failed to save task');
+      }
+
+      const savedTask = await response.json();
+
+      if (modalMode === 'create') {
+        setTasks([savedTask, ...tasks]);
+      } else {
+        setTasks(tasks.map(t => t.id === savedTask.id ? savedTask : t));
+      }
+
+      setIsModalOpen(false);
+      resetForm();
     } catch (err) {
-      alert(err.message);
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  // Handle Edit click
-  const handleEditClick = (task) => {
-    setEditingTaskId(task.id);
-    setTitle(task.title);
-    setDescription(task.description || '');
-    setPriority(task.priority);
-    setDueDate(task.due_date || '');
-  };
-
-  // Cancel Edit
-  const handleCancelEdit = () => {
-    setEditingTaskId(null);
-    setTitle('');
-    setDescription('');
-    setPriority('medium');
-    setDueDate('');
-  };
-
-  // Toggle Status (Single Click)
-  const handleToggleStatus = async (task) => {
-    const newStatus = task.status === 'completed' ? 'pending' : 'completed';
+  const handleStatusChange = async (task, newStatus) => {
     try {
-      const response = await fetch(`/api/tasks/${task.id}`, {
+      const response = await fetch(`${API_URL}/${task.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus })
+        body: JSON.stringify({ ...task, status: newStatus })
       });
-      if (!response.ok) throw new Error('Failed to update status');
+
+      if (!response.ok) {
+        throw new Error('Failed to update task status');
+      }
+
       const updatedTask = await response.json();
-      setTasks(tasks.map(t => t.id === task.id ? updatedTask : t));
+      setTasks(tasks.map(t => t.id === updatedTask.id ? updatedTask : t));
     } catch (err) {
-      alert(err.message);
+      setError(err.message);
     }
   };
 
-  // Delete Task
-  const handleDeleteTask = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this task?')) return;
+  const handleDeleteClick = (task) => {
+    setTaskToDelete(task);
+    setIsDeleteConfirmOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!taskToDelete) return;
+    
+    setError(null);
     try {
-      const response = await fetch(`/api/tasks/${id}`, {
+      const response = await fetch(`${API_URL}/${taskToDelete.id}`, {
         method: 'DELETE'
       });
-      if (!response.ok) throw new Error('Failed to delete task');
-      setTasks(tasks.filter(t => t.id !== id));
-      if (editingTaskId === id) {
-        handleCancelEdit();
+
+      if (!response.ok) {
+        throw new Error('Failed to delete task');
       }
+
+      setTasks(tasks.filter(t => t.id !== taskToDelete.id));
+      setIsDeleteConfirmOpen(false);
+      setTaskToDelete(null);
     } catch (err) {
-      alert(err.message);
+      setError(err.message);
     }
   };
 
-  // Check if task is overdue
-  const isOverdue = (dueDate, status) => {
-    if (!dueDate || status === 'completed') return false;
+  const openCreateModal = () => {
+    setModalMode('create');
+    resetForm();
+    setIsModalOpen(true);
+  };
+
+  const openEditModal = (task) => {
+    setModalMode('edit');
+    setCurrentTask(task);
+    setFormData({
+      title: task.title,
+      description: task.description || '',
+      priority: task.priority || 'Medium',
+      due_date: task.due_date || '',
+      status: task.status || 'To Do'
+    });
+    setFormErrors({});
+    setIsModalOpen(true);
+  };
+
+  const resetForm = () => {
+    setFormData({
+      title: '',
+      description: '',
+      priority: 'Medium',
+      due_date: '',
+      status: 'To Do'
+    });
+    setFormErrors({});
+    setCurrentTask(null);
+  };
+
+  // Filter and Search Logic
+  const filteredTasks = tasks.filter(task => {
+    const matchesSearch = 
+      task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (task.description && task.description.toLowerCase().includes(searchQuery.toLowerCase()));
+    
+    const matchesPriority = priorityFilter === 'All' || task.priority === priorityFilter;
+    
+    return matchesSearch && matchesPriority;
+  });
+
+  // Stats
+  const totalTasks = tasks.length;
+  const completedTasks = tasks.filter(t => t.status === 'Done').length;
+  const inProgressTasks = tasks.filter(t => t.status === 'In Progress').length;
+  const todoTasks = tasks.filter(t => t.status === 'To Do').length;
+  
+  const overdueTasksCount = tasks.filter(t => {
+    if (!t.due_date || t.status === 'Done') return false;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const due = new Date(dueDate);
-    due.setHours(0, 0, 0, 0);
-    return due < today;
+    const dueDate = new Date(t.due_date);
+    dueDate.setHours(0, 0, 0, 0);
+    return dueDate < today;
+  }).length;
+
+  const formatDate = (dateString) => {
+    if (!dateString) return 'No due date';
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return dateString;
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
-  // Priority weight for sorting
-  const priorityWeight = {
-    high: 3,
-    medium: 2,
-    low: 1
+  const isOverdue = (dateString, status) => {
+    if (!dateString || status === 'Done') return false;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dueDate = new Date(dateString);
+    dueDate.setHours(0, 0, 0, 0);
+    return dueDate < today;
   };
 
-  // Filter and Sort tasks
-  const filteredTasks = tasks.filter(task => {
-    if (statusFilter === 'all') return true;
-    return task.status === statusFilter;
-  });
+  const COLUMNS = [
+    { id: 'To Do', title: 'To Do', color: 'bg-blue-500', bg: 'bg-blue-50/40', border: 'border-blue-100', text: 'text-blue-700', icon: ListTodo },
+    { id: 'In Progress', title: 'In Progress', color: 'bg-amber-500', bg: 'bg-amber-50/40', border: 'border-amber-100', text: 'text-amber-700', icon: Clock },
+    { id: 'Done', title: 'Done', color: 'bg-emerald-500', bg: 'bg-emerald-50/40', border: 'border-emerald-100', text: 'text-emerald-700', icon: CheckCircle2 }
+  ];
 
-  const sortedTasks = [...filteredTasks].sort((a, b) => {
-    let comparison = 0;
-    if (sortBy === 'due_date') {
-      if (!a.due_date) return 1;
-      if (!b.due_date) return -1;
-      comparison = new Date(a.due_date) - new Date(b.due_date);
-    } else if (sortBy === 'priority') {
-      comparison = priorityWeight[b.priority] - priorityWeight[a.priority];
-    } else {
-      // Default: created_at
-      comparison = new Date(a.created_at) - new Date(b.created_at);
-    }
-    return sortOrder === 'asc' ? comparison : -comparison;
-  });
-
-  // Task counts
-  const totalTasks = tasks.length;
-  const pendingTasks = tasks.filter(t => t.status === 'pending').length;
-  const completedTasks = tasks.filter(t => t.status === 'completed').length;
+  const PRIORITY_COLORS = {
+    High: { bg: 'bg-rose-50 text-rose-700 border-rose-200', dot: 'bg-rose-500' },
+    Medium: { bg: 'bg-amber-50 text-amber-700 border-amber-200', dot: 'bg-amber-500' },
+    Low: { bg: 'bg-sky-50 text-sky-700 border-sky-200', dot: 'bg-sky-500' }
+  };
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      {/* Header */}
+    <div className="min-h-screen bg-slate-50/50 pb-12">
+      {/* Top Navigation / Header */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-10 shadow-sm">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex flex-col sm:flex-row justify-between items-center gap-4">
-          <div className="flex items-center gap-3">
-            <div className="bg-indigo-600 text-white p-2 rounded-lg shadow-md shadow-indigo-100">
-              <ListTodo className="w-6 h-6" />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <div className="bg-indigo-600 text-white p-2 rounded-xl shadow-md shadow-indigo-100">
+              <CheckCircle2 className="h-6 w-6" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-slate-900">TaskFlow</h1>
-              <p className="text-xs text-slate-500">Manage your daily tasks efficiently</p>
+              <h1 className="text-xl font-bold text-slate-900 tracking-tight">TaskFlow</h1>
+              <p className="text-xs text-slate-500 font-medium">Task Management Board</p>
             </div>
           </div>
-          
-          {/* Stats */}
-          <div className="flex gap-3 text-sm">
-            <div className="bg-slate-100 px-3 py-1.5 rounded-full text-slate-600 font-medium">
-              Total: <span className="text-slate-900 font-bold">{totalTasks}</span>
-            </div>
-            <div className="bg-amber-50 px-3 py-1.5 rounded-full text-amber-700 font-medium border border-amber-100">
-              Pending: <span className="text-amber-900 font-bold">{pendingTasks}</span>
-            </div>
-            <div className="bg-emerald-50 px-3 py-1.5 rounded-full text-emerald-700 font-medium border border-emerald-100">
-              Completed: <span className="text-emerald-900 font-bold">{completedTasks}</span>
-            </div>
+          <div className="flex items-center space-x-3">
+            <button 
+              onClick={fetchTasks}
+              className="p-2 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+              title="Refresh tasks"
+            >
+              <RefreshCw className={`h-5 w-5 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+            <button
+              onClick={openCreateModal}
+              className="inline-flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-semibold text-sm shadow-lg shadow-indigo-100 transition-all hover:-translate-y-0.5"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Add Task</span>
+            </button>
           </div>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 py-8">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8">
+        {/* Error Banner */}
         {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl flex items-center gap-3">
-            <AlertCircle className="w-5 h-5 flex-shrink-0" />
-            <p className="text-sm font-medium">{error}</p>
+          <div className="mb-6 bg-rose-50 border border-rose-200 rounded-xl p-4 flex items-start justify-between shadow-sm">
+            <div className="flex space-x-3">
+              <AlertCircle className="h-5 w-5 text-rose-600 shrink-0 mt-0.5" />
+              <div>
+                <h3 className="text-sm font-semibold text-rose-800">An error occurred</h3>
+                <p className="text-sm text-rose-700 mt-1">{error}</p>
+              </div>
+            </div>
+            <button 
+              onClick={() => setError(null)}
+              className="text-rose-500 hover:text-rose-700 p-1 rounded-lg hover:bg-rose-100 transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          {/* Left Column: Form */}
-          <div className="lg:col-span-4">
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm sticky top-24">
-              <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
-                {editingTaskId ? (
-                  <>
-                    <Edit2 className="w-5 h-5 text-indigo-600" />
-                    Edit Task
-                  </>
-                ) : (
-                  <>
-                    <Plus className="w-5 h-5 text-indigo-600" />
-                    Create New Task
-                  </>
-                )}
-              </h2>
-
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">
-                    Task Title *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g., Finish project proposal"
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    className="w-full px-3.5 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-sm transition-all"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">
-                    Description
-                  </label>
-                  <textarea
-                    placeholder="Add some details about this task..."
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    rows={3}
-                    className="w-full px-3.5 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-sm transition-all resize-none"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">
-                      Priority
-                    </label>
-                    <select
-                      value={priority}
-                      onChange={(e) => setPriority(e.target.value)}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-sm transition-all bg-white"
-                    >
-                      <option value="low">Low</option>
-                      <option value="medium">Medium</option>
-                      <option value="high">High</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">
-                      Due Date
-                    </label>
-                    <input
-                      type="date"
-                      value={dueDate}
-                      onChange={(e) => setDueDate(e.target.value)}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-sm transition-all"
-                    />
-                  </div>
-                </div>
-
-                <div className="pt-2 flex gap-2">
-                  {editingTaskId && (
-                    <button
-                      type="button"
-                      onClick={handleCancelEdit}
-                      className="flex-1 px-4 py-2 border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 font-medium text-sm transition-all flex items-center justify-center gap-1.5"
-                    >
-                      <X className="w-4 h-4" />
-                      Cancel
-                    </button>
-                  )}
-                  <button
-                    type="submit"
-                    className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium text-sm shadow-sm shadow-indigo-100 transition-all flex items-center justify-center gap-1.5"
-                  >
-                    {editingTaskId ? (
-                      <>
-                        <Check className="w-4 h-4" />
-                        Save Changes
-                      </>
-                    ) : (
-                      <>
-                        <Plus className="w-4 h-4" />
-                        Add Task
-                      </>
-                    )}
-                  </button>
-                </div>
-              </form>
+        {/* Stats Overview */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center space-x-4">
+            <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl">
+              <ListTodo className="h-6 w-6" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-slate-500">Total Tasks</p>
+              <p className="text-2xl font-bold text-slate-900">{totalTasks}</p>
             </div>
           </div>
+          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center space-x-4">
+            <div className="p-3 bg-amber-50 text-amber-600 rounded-xl">
+              <Clock className="h-6 w-6" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-slate-500">In Progress</p>
+              <p className="text-2xl font-bold text-slate-900">{inProgressTasks}</p>
+            </div>
+          </div>
+          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center space-x-4">
+            <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
+              <CheckCircle2 className="h-6 w-6" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-slate-500">Completed</p>
+              <p className="text-2xl font-bold text-slate-900">{completedTasks}</p>
+            </div>
+          </div>
+          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center space-x-4">
+            <div className={`p-3 rounded-xl ${overdueTasksCount > 0 ? 'bg-rose-50 text-rose-600' : 'bg-slate-50 text-slate-500'}`}>
+              <AlertTriangle className="h-6 w-6" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-slate-500">Overdue</p>
+              <p className={`text-2xl font-bold ${overdueTasksCount > 0 ? 'text-rose-600' : 'text-slate-900'}`}>{overdueTasksCount}</p>
+            </div>
+          </div>
+        </div>
 
-          {/* Right Column: Task List */}
-          <div className="lg:col-span-8 space-y-6">
-            {/* Filters & Sorting Controls */}
-            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-              {/* Status Filter */}
-              <div className="flex items-center gap-2">
-                <Filter className="w-4 h-4 text-slate-400" />
-                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider mr-2">Filter:</span>
-                <div className="flex bg-slate-100 p-1 rounded-lg text-xs font-medium">
-                  <button
-                    onClick={() => setStatusFilter('all')}
-                    className={`px-3 py-1 rounded-md transition-all ${statusFilter === 'all' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'}`}
+        {/* Search & Filters */}
+        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm mb-8 flex flex-col sm:flex-row gap-4 items-center justify-between">
+          <div className="relative w-full sm:max-w-md">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search tasks by title or description..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all"
+            />
+            {searchQuery && (
+              <button 
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center space-x-3 w-full sm:w-auto justify-end">
+            <div className="flex items-center space-x-2 text-sm text-slate-500 font-medium">
+              <Filter className="h-4 w-4" />
+              <span>Priority:</span>
+            </div>
+            <select
+              value={priorityFilter}
+              onChange={(e) => setPriorityFilter(e.target.value)}
+              className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all"
+            >
+              <option value="All">All Priorities</option>
+              <option value="High">High</option>
+              <option value="Medium">Medium</option>
+              <option value="Low">Low</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Kanban Board Columns */}
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-20 space-y-4">
+            <Loader2 className="h-10 w-10 text-indigo-600 animate-spin" />
+            <p className="text-slate-500 font-medium">Loading your tasks...</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+            {COLUMNS.map(column => {
+              const columnTasks = filteredTasks.filter(t => t.status === column.id);
+              const IconComponent = column.icon;
+
+              return (
+                <div 
+                  key={column.id} 
+                  className={`rounded-2xl border ${column.border} ${column.bg} p-4 flex flex-col min-h-[500px]`}
+                >
+                  {/* Column Header */}
+                  <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-200/60">
+                    <div className="flex items-center space-x-2">
+                      <div className={`p-1.5 rounded-lg text-white ${column.color}`}>
+                        <IconComponent className="h-4 w-4" />
+                      </div>
+                      <h3 className="font-bold text-slate-800">{column.title}</h3>
+                    </div>
+                    <span className="bg-white border border-slate-200 text-slate-600 text-xs font-bold px-2.5 py-1 rounded-full shadow-sm">
+                      {columnTasks.length}
+                    </span>
+                  </div>
+
+                  {/* Task Cards List */}
+                  <div className="space-y-3 flex-1 overflow-y-auto max-h-[600px] pr-1">
+                    {columnTasks.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-12 px-4 border-2 border-dashed border-slate-200 rounded-xl bg-white/50">
+                        <p className="text-slate-400 text-sm font-medium text-center">No tasks here</p>
+                      </div>
+                    ) : (
+                      columnTasks.map(task => {
+                        const isTaskOverdue = isOverdue(task.due_date, task.status);
+                        const priorityStyle = PRIORITY_COLORS[task.priority] || PRIORITY_COLORS.Medium;
+
+                        return (
+                          <div 
+                            key={task.id}
+                            className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md transition-all duration-200 group relative"
+                          >
+                            {/* Priority Badge & Actions */}
+                            <div className="flex items-center justify-between mb-2.5">
+                              <span className={`inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${priorityStyle.bg}`}>
+                                <span className={`h-1.5 w-1.5 rounded-full ${priorityStyle.dot}`} />
+                                <span>{task.priority}</span>
+                              </span>
+                              
+                              <div className="flex items-center space-x-1 opacity-80 group-hover:opacity-100 transition-opacity">
+                                <button
+                                  onClick={() => openEditModal(task)}
+                                  className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                                  title="Edit Task"
+                                >
+                                  <Edit2 className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteClick(task)}
+                                  className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                                  title="Delete Task"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Title & Description */}
+                            <h4 className="font-bold text-slate-900 mb-1 group-hover:text-indigo-600 transition-colors">
+                              {task.title}
+                            </h4>
+                            {task.description && (
+                              <p className="text-slate-600 text-sm mb-4 line-clamp-3 whitespace-pre-line">
+                                {task.description}
+                              </p>
+                            )}
+
+                            {/* Due Date & Status Transitions */}
+                            <div className="flex items-center justify-between pt-3 border-t border-slate-100 text-xs">
+                              <div className={`flex items-center space-x-1.5 font-medium ${isTaskOverdue ? 'text-rose-600' : 'text-slate-500'}`}>
+                                <Calendar className="h-3.5 w-3.5" />
+                                <span className={isTaskOverdue ? 'font-semibold' : ''}>
+                                  {formatDate(task.due_date)}
+                                  {isTaskOverdue && ' (Overdue)'}
+                                </span>
+                              </div>
+
+                              {/* Quick Status Move Buttons */}
+                              <div className="flex items-center space-x-1">
+                                {column.id !== 'To Do' && (
+                                  <button
+                                    onClick={() => handleStatusChange(task, column.id === 'Done' ? 'In Progress' : 'To Do')}
+                                    className="p-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded text-slate-500 hover:text-slate-700 transition-colors"
+                                    title={`Move to ${column.id === 'Done' ? 'In Progress' : 'To Do'}`}
+                                  >
+                                    <ChevronLeft className="h-3.5 w-3.5" />
+                                  </button>
+                                )}
+                                {column.id !== 'Done' && (
+                                  <button
+                                    onClick={() => handleStatusChange(task, column.id === 'To Do' ? 'In Progress' : 'Done')}
+                                    className="p-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded text-slate-500 hover:text-slate-700 transition-colors"
+                                    title={`Move to ${column.id === 'To Do' ? 'In Progress' : 'Done'}`}
+                                  >
+                                    <ChevronRight className="h-3.5 w-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </main>
+
+      {/* Create / Edit Task Modal */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <h3 className="text-lg font-bold text-slate-900">
+                {modalMode === 'create' ? 'Create New Task' : 'Edit Task Details'}
+              </h3>
+              <button 
+                onClick={() => setIsModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Modal Form */}
+            <form onSubmit={handleCreateOrUpdate} className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                  Task Title <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g., Design landing page"
+                  value={formData.title}
+                  onChange={(e) => {
+                    setFormData({ ...formData, title: e.target.value });
+                    if (formErrors.title) setFormErrors({ ...formErrors, title: '' });
+                  }}
+                  className={`w-full px-3.5 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all ${
+                    formErrors.title ? 'border-rose-300 focus:ring-rose-500 bg-rose-50/30' : 'border-slate-200'
+                  }`}
+                />
+                {formErrors.title && (
+                  <p className="text-rose-600 text-xs mt-1 font-medium">{formErrors.title}</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                  Description
+                </label>
+                <textarea
+                  placeholder="Describe the task details, requirements, or notes..."
+                  rows={3}
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                    Priority
+                  </label>
+                  <select
+                    value={formData.priority}
+                    onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
+                    className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all bg-white"
                   >
-                    All
-                  </button>
-                  <button
-                    onClick={() => setStatusFilter('pending')}
-                    className={`px-3 py-1 rounded-md transition-all ${statusFilter === 'pending' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'}`}
-                  >
-                    Pending
-                  </button>
-                  <button
-                    onClick={() => setStatusFilter('completed')}
-                    className={`px-3 py-1 rounded-md transition-all ${statusFilter === 'completed' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'}`}
-                  >
-                    Completed
-                  </button>
+                    <option value="Low">Low</option>
+                    <option value="Medium">Medium</option>
+                    <option value="High">High</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                    Due Date
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.due_date}
+                    onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
+                    className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                  />
                 </div>
               </div>
 
-              {/* Sorting */}
-              <div className="flex items-center gap-3">
-                <ArrowUpDown className="w-4 h-4 text-slate-400" />
-                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Sort by:</span>
-                <select
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value)}
-                  className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white"
-                >
-                  <option value="created_at">Date Created</option>
-                  <option value="due_date">Due Date</option>
-                  <option value="priority">Priority</option>
-                </select>
+              {modalMode === 'edit' && (
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                    Status
+                  </label>
+                  <select
+                    value={formData.status}
+                    onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                    className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all bg-white"
+                  >
+                    <option value="To Do">To Do</option>
+                    <option value="In Progress">In Progress</option>
+                    <option value="Done">Done</option>
+                  </select>
+                </div>
+              )}
+
+              {/* Modal Actions */}
+              <div className="pt-4 border-t border-slate-100 flex items-center justify-end space-x-3">
                 <button
-                  onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
-                  className="p-1.5 border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-600 transition-all"
-                  title={sortOrder === 'asc' ? 'Ascending' : 'Descending'}
+                  type="button"
+                  onClick={() => setIsModalOpen(false)}
+                  className="px-4 py-2 border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
                 >
-                  <span className="text-xs font-bold uppercase px-1">{sortOrder}</span>
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="inline-flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white px-4 py-2 rounded-xl font-semibold text-sm shadow-lg shadow-indigo-100 transition-all"
+                >
+                  {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
+                  <span>{modalMode === 'create' ? 'Create Task' : 'Save Changes'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {isDeleteConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-6 text-center">
+              <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-rose-50 text-rose-600 mb-4">
+                <AlertTriangle className="h-6 w-6" />
+              </div>
+              <h3 className="text-lg font-bold text-slate-900 mb-2">Delete Task</h3>
+              <p className="text-sm text-slate-500 mb-6">
+                Are you sure you want to delete <span className="font-semibold text-slate-800">"{taskToDelete?.title}"</span>? This action cannot be undone.
+              </p>
+              <div className="flex items-center justify-center space-x-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsDeleteConfirmOpen(false);
+                    setTaskToDelete(null);
+                  }}
+                  className="px-4 py-2 border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmDelete}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-sm font-semibold shadow-lg shadow-rose-100 transition-all"
+                >
+                  Delete Task
                 </button>
               </div>
             </div>
-
-            {/* Tasks List */}
-            {loading ? (
-              <div className="text-center py-12 bg-white rounded-2xl border border-slate-200 shadow-sm">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mx-auto mb-4"></div>
-                <p className="text-slate-500 text-sm">Loading tasks...</p>
-              </div>
-            ) : sortedTasks.length === 0 ? (
-              <div className="text-center py-16 bg-white rounded-2xl border border-slate-200 shadow-sm">
-                <div className="bg-slate-50 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <ListTodo className="w-6 h-6 text-slate-400" />
-                </div>
-                <h3 className="text-slate-900 font-semibold mb-1">No tasks found</h3>
-                <p className="text-slate-500 text-sm max-w-xs mx-auto">
-                  {statusFilter === 'all' 
-                    ? "Get started by creating your first task using the form on the left."
-                    : `No tasks match the "${statusFilter}" filter.`}
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {sortedTasks.map((task) => {
-                  const overdue = isOverdue(task.due_date, task.status);
-                  const isHighPriority = task.priority === 'high';
-                  const isCompleted = task.status === 'completed';
-
-                  return (
-                    <div
-                      key={task.id}
-                      className={`bg-white rounded-xl border transition-all duration-200 shadow-sm hover:shadow-md flex items-start gap-4 p-4 ${
-                        isCompleted ? 'opacity-65 border-slate-200 bg-slate-50/50' : 
-                        overdue ? 'border-red-200 bg-red-50/10' : 
-                        isHighPriority ? 'border-amber-200' : 'border-slate-200'
-                      }`}
-                    >
-                      {/* Status Toggle Checkbox (Single Click) */}
-                      <button
-                        onClick={() => handleToggleStatus(task)}
-                        className="mt-0.5 text-slate-400 hover:text-indigo-600 transition-colors flex-shrink-0"
-                        title={isCompleted ? "Mark as pending" : "Mark as completed"}
-                      >
-                        {isCompleted ? (
-                          <CheckCircle className="w-5 h-5 text-emerald-600 fill-emerald-50" />
-                        ) : (
-                          <Circle className="w-5 h-5 text-slate-300 hover:border-indigo-500" />
-                        )}
-                      </button>
-
-                      {/* Task Content */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-start justify-between gap-2 mb-1">
-                          <h3 className={`font-semibold text-slate-900 text-sm sm:text-base break-words ${isCompleted ? 'line-through text-slate-400' : ''}`}>
-                            {task.title}
-                          </h3>
-                          
-                          {/* Badges */}
-                          <div className="flex items-center gap-1.5 flex-shrink-0">
-                            {/* Priority Badge */}
-                            <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
-                              task.priority === 'high' ? 'bg-red-100 text-red-700' :
-                              task.priority === 'medium' ? 'bg-amber-100 text-amber-700' :
-                              'bg-slate-100 text-slate-600'
-                            }`}>
-                              {task.priority}
-                            </span>
-                          </div>
-                        </div>
-
-                        {task.description && (
-                          <p className={`text-xs sm:text-sm text-slate-500 mb-3 break-words whitespace-pre-line ${isCompleted ? 'line-through text-slate-400' : ''}`}>
-                            {task.description}
-                          </p>
-                        )}
-
-                        {/* Footer info */}
-                        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-400">
-                          {task.due_date && (
-                            <div className={`flex items-center gap-1 font-medium ${overdue ? 'text-red-600 font-semibold' : 'text-slate-500'}`}>
-                              {overdue ? (
-                                <AlertCircle className="w-3.5 h-3.5" />
-                              ) : (
-                                <Calendar className="w-3.5 h-3.5" />
-                              )}
-                              <span>Due: {new Date(task.due_date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-                              {overdue && <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.2 rounded font-bold uppercase tracking-wider ml-1">Overdue</span>}
-                            </div>
-                          )}
-                          <div className="flex items-center gap-1">
-                            <Clock className="w-3.5 h-3.5" />
-                            <span>Created: {new Date(task.created_at).toLocaleDateString()}</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Actions */}
-                      <div className="flex items-center gap-1 flex-shrink-0 self-center">
-                        <button
-                          onClick={() => handleEditClick(task)}
-                          className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-slate-50 rounded-lg transition-all"
-                          title="Edit Task"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteTask(task.id)}
-                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
-                          title="Delete Task"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
           </div>
         </div>
-      </main>
+      )}
     </div>
   );
 }
-
-export default App;
